@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+downloads/
+media/
+*.xlsx
+*.xls
+
+# Лог-файли
+logs/
+*.log
+logs/*.log
+npm-debug.log
+debug.log
+error.log
+pm2.log
+pm2.pid
+
+# Кеш файли
+.cache/
+
+# Docker
+docker-compose.override.yml
+
+# OS
+Thumbs.db
