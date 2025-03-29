@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Parser</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            align-items: center;
+        }
+        .select-container {
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+            background-color: white;
+        }
+        .file-input {
+            padding: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 4px;
+            width: 100%;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .file-input.has-file {
+            border-color: #4CAF50;
+            background-color: #f1f8e9;
+        }
+        .file-name {
+            margin-top: 10px;
+            color: #4CAF50;
+            font-weight: bold;
+            word-break: break-all;
+        }
+        .submit-btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .submit-btn:hover {
+            background-color: #45a049;
+        }
+        .submit-btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Social Media Parser</h1>
+        <form class="upload-form" id="uploadForm" enctype="multipart/form-data">
+            <div class="file-input" id="dropZone">
+                <p>Drag and drop your Excel file here or click to select</p>
+                <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" style="display: none;">
+                <div id="fileName" class="file-name"></div>
+            </div>
+            <div class="select-container">
+                <label for="languageSelect">Select Language:</label>
+                <select id="languageSelect" name="language" required>
+                    <option value="">Choose a language</option>
+                    <option value="EN">English</option>
+                    <option value="PL">Polish</option>
+                    <option value="TR">Turkish</option>
+                    <option value="DE">Germany</option>
+                    <option value="ES">Spain</option>
+                    
+                </select>
+            </div>
+            <button type="submit" class="submit-btn" id="submitBtn" disabled>Process File</button>
+        </form>
+        <div id="status"></div>
+        <div class="loading" id="loading">
+            <p>Processing your file... This may take a few minutes.</p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const submitBtn = document.getElementById('submitBtn');
+        const status = document.getElementById('status');
+        const loading = document.getElementById('loading');
+        const languageSelect = document.getElementById('languageSelect');
+
+        // Handle file selection
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileSelect);
+        languageSelect.addEventListener('change', updateSubmitButton);
+
+        function updateSubmitButton() {
+            const hasFile = fileInput.files.length > 0;
+            const hasLanguage = languageSelect.value !== '';
+            submitBtn.disabled = !hasFile || !hasLanguage;
+        }
+
+        function handleFileSelect() {
+            const fileName = fileInput.files[0]?.name;
+            const fileNameDiv = document.getElementById('fileName');
+            const dropZone = document.getElementById('dropZone');
+            
+            if (fileName) {
+                fileNameDiv.textContent = `Selected file: ${fileName}`;
+                dropZone.classList.add('has-file');
+            } else {
+                fileNameDiv.textContent = '';
+                dropZone.classList.remove('has-file');
+            }
+            updateSubmitButton();
+            status.style.display = 'none';
+        }
+
+        // Handle drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#4CAF50';
+            dropZone.style.backgroundColor = '#f1f8e9';
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = dropZone.classList.contains('has-file') ? '#4CAF50' : '#ccc';
+            dropZone.style.backgroundColor = dropZone.classList.contains('has-file') ? '#f1f8e9' : 'white';
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#4CAF50';
+            dropZone.style.backgroundColor = '#f1f8e9';
+            const files = e.dataTransfer.files;
+            if (files.length) {
+                fileInput.files = files;
+                handleFileSelect();
+            }
+        });
+
+        // Handle form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+            status.style.display = 'none';
+
+            try {
+                if (fileInput.files.length === 0) {
+                    throw new Error('Please select a file');
+                }
+
+                const file = fileInput.files[0];
+                if (!file.name.match(/\.(xlsx|xls)$/)) {
+                    throw new Error('Only Excel files are allowed!');
+                }
+
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('language', document.getElementById('languageSelect').value);
+
+                console.log('Sending request with:', {
+                    file: file.name,
+                    language: document.getElementById('languageSelect').value
+                });
+
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                }
+
+                if (data.success) {
+                    status.textContent = 'File processed successfully!';
+                    status.className = 'success';
+                    window.location.href = data.downloadUrl;
+                } else {
+                    throw new Error(data.error || 'Error processing file');
+                }
+            } catch (error) {
+                status.textContent = error.message;
+                status.className = 'error';
+                console.error('Error:', error);
+            } finally {
+                status.style.display = 'block';
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html> 
