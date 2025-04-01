@@ -4,28 +4,47 @@ const path = require('path');
 async function generateExcelFile(data) {
     // Створюємо масив даних з правильним порядком полів
     const excelData = data.map(item => {
-        // Створюємо новий об'єкт тільки з потрібними полями
-        return {
-            'Language': item.language, 
-            'Type of post': item.typeOfPost,
-            'Author Name': item.authorName,
-            'Description': item.description,
-            'Description 2': item.description2,
-            'Description 3': item.description3,
-            'Description 4': item.description4,
-            'Likes': item.likes,
-            'Comments': item.comments,
-            'Shares': item.shares,
-            'Media': item.media,
-            'Author_Picture': item.authorPicture
-        };
+        let baseData;
+
+        if (item.platform === 'Facebook') {
+            baseData = {
+                'Language': item.language,
+                'Type of post': item.typeOfPost,
+                'Author Name': item.authorName,
+                'Description': item.description,
+                'Description 2': item.description2 || '',
+                'Description 3': item.description3 || '',
+                'Description 4': item.description4 || '',
+                'Likes': item.likes,
+                'Comments': item.comments,
+                'Shares': item.shares,
+                'Media': item.media,
+                'Author_Picture': item.authorPicture,
+                'Post_url': item.url
+            };
+        } else if (item.platform === 'Instagram') {
+            baseData = {
+                'Language': item.language,
+                'Type of post': item.typeOfPost,
+                'Author Name': item.authorName,
+                'Description': item.description,
+                'Likes': item.likes,
+                'Comments': item.comments,
+                'Shares': item.shares,
+                'Media': item.media,
+                'Author_Picture': item.authorPicture,
+                'Post_url': item.url
+            };
+        }
+
+        return baseData;
     });
 
     // Створюємо новий робочий аркуш
     const ws = XLSX.utils.json_to_sheet(excelData);
 
     // Встановлюємо ширину колонок
-    const colWidths = Array(11).fill({ wch: 20 }); // 11 колонок по 10 символів
+    const colWidths = Array(Object.keys(excelData[0]).length).fill({ wch: 20 }); // Динамічна кількість колонок
     ws['!cols'] = colWidths;
 
     // Створюємо новий робочий зошит
@@ -45,4 +64,4 @@ async function generateExcelFile(data) {
 
 module.exports = {
     generateExcelFile
-}; 
+};

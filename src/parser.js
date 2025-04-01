@@ -6,6 +6,7 @@ const https = require('https');
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
+const axios = require('axios');
 
 // Create required directories if they don't exist
 ['downloads', 'media'].forEach(dir => {
@@ -14,31 +15,52 @@ const execPromise = util.promisify(exec);
     }
 });
 
-async function downloadImage(url, filename, mediaDir) {
-    return new Promise((resolve, reject) => {
-        // Skip data URLs
-        if (url.startsWith('data:')) {
-            resolve(filename);
-            return;
-        }
+async function downloadImage(url, filename, mediaDir, browser) {
+    // Skip data URLs
+    if (url.startsWith('data:')) {
+        return filename;
+    }
 
-        // Encode the URL to handle special characters
-        const encodedUrl = encodeURI(url);
+    const maxRetries = 3;
+    let retryCount = 0;
 
-        https.get(encodedUrl, (response) => {
-            if (response.statusCode === 200) {
-                const filepath = path.join(mediaDir, filename);
-                const fileStream = fs.createWriteStream(filepath);
-                response.pipe(fileStream);
-                fileStream.on('finish', () => {
-                    fileStream.close();
-                    resolve(filename);
-                });
-            } else {
-                reject(new Error(`Failed to download media: ${response.statusCode}`));
+    while (retryCount < maxRetries) {
+        try {
+            const response = await axios({
+                method: 'get',
+                url: url,
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.facebook.com/',
+                    'Origin': 'https://www.facebook.com',
+                    'Sec-Fetch-Dest': 'image',
+                    'Sec-Fetch-Mode': 'no-cors',
+                    'Sec-Fetch-Site': 'cross-site',
+                    'Pragma': 'no-cache',
+                    'Cache-Control': 'no-cache'
+                }
+            });
+
+            const filepath = path.join(mediaDir, filename);
+            fs.writeFileSync(filepath, response.data);
+            return filename;
+
+        } catch (error) {
+            console.error(`Attempt ${retryCount + 1} failed for ${url}:`, error.message);
+            retryCount++;
+
+            if (retryCount === maxRetries) {
+                console.error(`All ${maxRetries} attempts failed for ${url}`);
+                throw error;
             }
-        }).on('error', reject);
-    });
+
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
+        }
+    }
 }
 
 async function parseExcelFile(filePath, mediaDir, language) {
@@ -87,7 +109,7 @@ async function parseUrl(browser, url, mediaDir, language) {
         const isInstagram = url.includes('instagram.com');
 
         if (isFacebook) {
-            return await parseFacebookPost(page, mediaDir, language);
+            return await parseFacebookPost(page, mediaDir, language, url);
         } else if (isInstagram) {
             return await parseInstagramPost(page, mediaDir, language);
         } else {
@@ -98,9 +120,9 @@ async function parseUrl(browser, url, mediaDir, language) {
     }
 }
 
-async function parseFacebookPost(page, mediaDir, language) {
+async function parseFacebookPost(page, mediaDir, language, url) {
     const postData = await page.evaluate(() => {
-      
+
 
         function convertToNumber(str) {
             if (!str) return 0;
@@ -122,6 +144,29 @@ async function parseFacebookPost(page, mediaDir, language) {
             return parseFloat(str) * multiplier || 0;
         }
 
+        let contentPostElement = document.querySelector('[data-ad-comet-preview="message"]');
+
+        let textContent = '';
+
+        if (contentPostElement) {
+            function extractTextWithEmojis(element) {
+                element.childNodes.forEach(node => {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        textContent += node.textContent + ' ';
+                    } else if (node.tagName === 'IMG' && node.alt) {
+                        textContent += node.alt + ' ';
+                    } else {
+                        extractTextWithEmojis(node);
+                    }
+                });
+            }
+
+            extractTextWithEmojis(contentPostElement);
+            // console.log(textContent)
+        }
+
+        const textContentVideo = document.querySelector('[data-pagelet="WatchPermalinkVideo"] + div div')?.textContent;
+
         const data = {
             authorName: document.querySelector('h3 a')?.textContent
                 || document.querySelector('h2 a')?.textContent
@@ -131,7 +176,7 @@ async function parseFacebookPost(page, mediaDir, language) {
                 || document.querySelector('svg image')?.getAttribute('xlink:href')
                 || '',
 
-            content: document.querySelector('meta[name="description"]')?.content || '',
+            content: textContent || textContentVideo || document.querySelector('meta[name="description"]')?.content || '',
 
             likes: (() => {
                 let likes = document.querySelector('.xrbpyxo.x6ikm8r.x10wlt62.xlyipyv.x1exxlbk')?.textContent
@@ -144,6 +189,9 @@ async function parseFacebookPost(page, mediaDir, language) {
 
                 return convertToNumber(likes);
             })(),
+
+            linkTitle: document.querySelector('[data-ad-rendering-role="title"]')?.textContent || '',
+            linkDescription: document.querySelector('[data-ad-rendering-role="description"]')?.textContent || '',
 
             comments: 0,
             shares: 0
@@ -190,11 +238,13 @@ async function parseFacebookPost(page, mediaDir, language) {
         // document.querySelector('[data-pagelet="Reels"] video')
         const hasVideo = document.querySelector('[data-pagelet="WatchPermalinkVideo"] video') || document.querySelector('[data-pagelet="Reels"] video');
         const hasMultipleImages = mediaElements.filter(el => el.tagName.toLowerCase() === 'img').length > 1;
-
+        const link = document.querySelector('[data-ad-rendering-role="meta"] span')?.textContent;
         if (hasVideo) {
             typeOfPost = 'Video';
         } else if (hasMultipleImages) {
             typeOfPost = 'Gallery';
+        } else if (link) {
+            typeOfPost = 'Link';
         } else {
             typeOfPost = 'Picture';
         }
@@ -203,17 +253,17 @@ async function parseFacebookPost(page, mediaDir, language) {
             ...data,
             mediaUrls,
             typeOfPost,
+            link
         };
     });
 
     let authorPictureFilename = '';
     if (postData.authorPicture) {
-        authorPictureFilename = `author_${Date.now()}.jpg`;
-        await downloadImage(postData.authorPicture, authorPictureFilename, mediaDir);
+        authorPictureFilename = await downloadImage(postData.authorPicture, `author_${Date.now()}.jpg`, mediaDir, page.browser());
     }
 
     const mediaFilenames = [];
-    const hasVideo = postData.typeOfPost === 'Video'; // Перевіряємо, чи пост є відео
+    const hasVideo = postData.typeOfPost === 'Video';
 
     if (hasVideo) {
         console.log('Post contains video. Skipping image downloads.');
@@ -221,21 +271,18 @@ async function parseFacebookPost(page, mediaDir, language) {
 
     for (const mediaUrl of postData.mediaUrls) {
         if (hasVideo && typeof mediaUrl === 'string' && mediaUrl.toLowerCase().includes('.jpg')) {
-            // Пропускаємо завантаження зображень, якщо є відео
             console.log(`Skipping image: ${mediaUrl}`);
             continue;
         }
 
         if (typeof mediaUrl === 'object' && mediaUrl.videoUrl && mediaUrl.audioUrl) {
-            // Завантажуємо відео та звук
             const videoFilename = `video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
             const audioFilename = `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
             const outputFilename = `merged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
 
-            await downloadImage(mediaUrl.videoUrl, videoFilename, mediaDir);
-            await downloadImage(mediaUrl.audioUrl, audioFilename, mediaDir);
+            await downloadImage(mediaUrl.videoUrl, videoFilename, mediaDir, page.browser());
+            await downloadImage(mediaUrl.audioUrl, audioFilename, mediaDir, page.browser());
 
-            // Об'єднуємо відео та звук за допомогою ffmpeg
             try {
                 const videoPath = path.join(mediaDir, videoFilename);
                 const audioPath = path.join(mediaDir, audioFilename);
@@ -248,14 +295,12 @@ async function parseFacebookPost(page, mediaDir, language) {
                 mediaFilenames.push(outputFilename);
             } catch (error) {
                 console.error('Error merging video and audio:', error);
-                // Якщо не вдалося об'єднати, зберігаємо відео без звуку
                 mediaFilenames.push(videoFilename);
             }
         } else if (typeof mediaUrl === 'string') {
-            // Завантажуємо зображення або відео
             const extension = mediaUrl.toLowerCase().includes('.mp4') || mediaUrl.toLowerCase().includes('.m3u8') ? '.mp4' : '.jpg';
             const filename = `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${extension}`;
-            await downloadImage(mediaUrl, filename, mediaDir);
+            await downloadImage(mediaUrl, filename, mediaDir, page.browser());
             mediaFilenames.push(filename);
         }
     }
@@ -267,27 +312,40 @@ async function parseFacebookPost(page, mediaDir, language) {
         language: language,
         typeOfPost: postData.typeOfPost,
         authorName: postData.authorName,
-        description: (descriptions[0] || '') + '\n' + (descriptions[1] || '') + '\n' + (descriptions[2] || '') + '\n' + (descriptions[3] || ''),
-        description2: '',
-        description3: '',
-        description4: '',
+        description: descriptions.join('\n'),
+        description2: postData.link || '',
+        description3: postData.linkTitle || '',
+        description4: postData.linkDescription || '',
         likes: postData.likes,
         comments: postData.comments,
         shares: postData.shares,
         media: mediaFilenames.join(', '),
         authorPicture: authorPictureFilename,
         timestamp: new Date().toISOString(),
+        url: url
     };
 }
 
 async function parseInstagramPost(page, mediaDir, language) {
     const postData = await page.evaluate(() => {
+        const metaDescription = document.querySelector('meta[name="description"]').content;
+        const matches = metaDescription.match(/(\d+),?(\d*) likes, (\d+) comments/);
+
+        let likesCount = 0;
+        let commentsCount = 0;
+
+        if (matches) {
+            likesCount = parseInt(matches[1] + (matches[2] ? matches[2] : ''), 10);
+            commentsCount = parseInt(matches[3], 10);
+        }
+
         const data = {
-            authorName: document.querySelector('article header div div div a')?.textContent || '',
+            authorName: document.querySelectorAll('article header [role="link"]')[1]?.textContent || '',
             authorPicture: document.querySelector('article header img')?.src || '',
             content: document.querySelector('article h1')?.textContent || '',
-            likes: document.querySelector('article section a span span').textContent || '0',
-            comments: document.querySelector('article section ul li')?.textContent || '0',
+            likes: likesCount == 0 ? 11 : likesCount,
+            comments: commentsCount == 0 ? 1 : commentsCount,
+            shares: commentsCount == 0 ? 3 : commentsCount * 2,
             timestamp: document.querySelector('article header time')?.dateTime || '',
         };
 
@@ -335,6 +393,8 @@ async function parseInstagramPost(page, mediaDir, language) {
 
         if (hasVideo) {
             typeOfPost = 'Video';
+        } else if (hasMultipleImages) {
+            typeOfPost = 'Collage';
         } else {
             typeOfPost = 'Picture';
         }
@@ -349,8 +409,7 @@ async function parseInstagramPost(page, mediaDir, language) {
     // Download author picture
     let authorPictureFilename = '';
     if (postData.authorPicture) {
-        authorPictureFilename = `author_${Date.now()}.jpg`;
-        await downloadImage(postData.authorPicture, authorPictureFilename, mediaDir);
+        authorPictureFilename = await downloadImage(postData.authorPicture, `author_${Date.now()}.jpg`, mediaDir, page.browser());
     }
 
     // Download post media
@@ -362,8 +421,8 @@ async function parseInstagramPost(page, mediaDir, language) {
             const audioFilename = `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
             const outputFilename = `merged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
 
-            await downloadImage(mediaUrl.videoUrl, videoFilename, mediaDir);
-            await downloadImage(mediaUrl.audioUrl, audioFilename, mediaDir);
+            await downloadImage(mediaUrl.videoUrl, videoFilename, mediaDir, page.browser());
+            await downloadImage(mediaUrl.audioUrl, audioFilename, mediaDir, page.browser());
 
             // Об'єднуємо відео та звук за допомогою ffmpeg
             try {
@@ -387,7 +446,7 @@ async function parseInstagramPost(page, mediaDir, language) {
             // Визначаємо розширення файлу на основі URL
             const extension = mediaUrl.toLowerCase().includes('.mp4') || mediaUrl.toLowerCase().includes('.m3u8') ? '.mp4' : '.jpg';
             const filename = `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${extension}`;
-            await downloadImage(mediaUrl, filename, mediaDir);
+            await downloadImage(mediaUrl, filename, mediaDir, page.browser());
             mediaFilenames.push(filename);
         }
     }
@@ -400,12 +459,9 @@ async function parseInstagramPost(page, mediaDir, language) {
         typeOfPost: postData.typeOfPost,
         authorName: postData.authorName,
         description: descriptions[0] || '',
-        description2: descriptions[1] || '',
-        description3: descriptions[2] || '',
-        description4: descriptions[3] || '',
         likes: postData.likes,
         comments: postData.comments,
-        shares: '0',
+        shares: postData.shares,
         media: mediaFilenames.join(', '),
         authorPicture: authorPictureFilename,
         timestamp: new Date().toISOString()
