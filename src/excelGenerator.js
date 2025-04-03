@@ -25,6 +25,7 @@ async function generateExcelFile(data) {
         } else if (item.platform === 'Instagram') {
             baseData = {
                 'Language': item.language,
+                'Category of post': 'xx',
                 'Type of post': item.typeOfPost,
                 'Author Name': item.authorName,
                 'Description': item.description,

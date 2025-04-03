@@ -111,7 +111,7 @@ async function parseUrl(browser, url, mediaDir, language) {
         if (isFacebook) {
             return await parseFacebookPost(page, mediaDir, language, url);
         } else if (isInstagram) {
-            return await parseInstagramPost(page, mediaDir, language);
+            return await parseInstagramPost(page, mediaDir, language, url);
         } else {
             throw new Error('Unsupported social media platform');
         }
@@ -276,6 +276,7 @@ async function parseFacebookPost(page, mediaDir, language, url) {
         }
 
         if (typeof mediaUrl === 'object' && mediaUrl.videoUrl && mediaUrl.audioUrl) {
+            // Завантажуємо відео та звук
             const videoFilename = `video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
             const audioFilename = `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
             const outputFilename = `merged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
@@ -283,21 +284,26 @@ async function parseFacebookPost(page, mediaDir, language, url) {
             await downloadImage(mediaUrl.videoUrl, videoFilename, mediaDir, page.browser());
             await downloadImage(mediaUrl.audioUrl, audioFilename, mediaDir, page.browser());
 
+            // Об'єднуємо відео та звук за допомогою ffmpeg
             try {
                 const videoPath = path.join(mediaDir, videoFilename);
                 const audioPath = path.join(mediaDir, audioFilename);
                 const outputPath = path.join(mediaDir, outputFilename);
 
                 await execPromise(`ffmpeg -i "${videoPath}" -i "${audioPath}" -c:v copy -c:a aac "${outputPath}"`);
+
+                // Видаляємо тимчасові файли
                 fs.unlinkSync(videoPath);
                 fs.unlinkSync(audioPath);
 
                 mediaFilenames.push(outputFilename);
             } catch (error) {
                 console.error('Error merging video and audio:', error);
+                // Якщо не вдалося об'єднати, зберігаємо відео без звуку
                 mediaFilenames.push(videoFilename);
             }
         } else if (typeof mediaUrl === 'string') {
+            // Визначаємо розширення файлу на основі URL
             const extension = mediaUrl.toLowerCase().includes('.mp4') || mediaUrl.toLowerCase().includes('.m3u8') ? '.mp4' : '.jpg';
             const filename = `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${extension}`;
             await downloadImage(mediaUrl, filename, mediaDir, page.browser());
@@ -326,8 +332,8 @@ async function parseFacebookPost(page, mediaDir, language, url) {
     };
 }
 
-async function parseInstagramPost(page, mediaDir, language) {
-    const postData = await page.evaluate(() => {
+async function parseInstagramPost(page, mediaDir, language, url) {
+    const postData = await page.evaluate(async () => {
         const metaDescription = document.querySelector('meta[name="description"]').content;
         const matches = metaDescription.match(/(\d+),?(\d*) likes, (\d+) comments/);
 
@@ -357,16 +363,66 @@ async function parseInstagramPost(page, mediaDir, language) {
                 url.searchParams.delete('bytestart');
                 url.searchParams.delete('byteend');
                 urls.push(url.toString());
-                console.log(urls)
             }
-
         });
 
-        // Get media elements
+        // Function to scroll through the post and collect all images
+        async function collectAllImages() {
+            const mediaContainer = document.querySelector('article');
+            if (!mediaContainer) return [];
+
+            const allImages = new Set();
+            let previousHeight = 0;
+            let attempts = 0;
+            const maxAttempts = 20; // Збільшуємо кількість спроб
+
+            while (attempts < maxAttempts) {
+                // Отримуємо поточні зображення
+                const currentImages = Array.from(mediaContainer.querySelectorAll('img[srcset]'))
+                    .map(el => {
+                        const srcset = el.getAttribute('srcset');
+                        if (srcset) {
+                            const srcsetUrls = srcset.split(',')
+                                .map(s => s.trim().split(' ')[0]);
+                            return srcsetUrls[srcsetUrls.length - 1];
+                        }
+                        return el.src;
+                    })
+                    .filter(url => url && !url.includes('avatar') && !url.includes('profile') && !url.includes('icon'));
+
+                // Додаємо нові зображення до множини
+                currentImages.forEach(url => allImages.add(url));
+
+                // Шукаємо та натискаємо кнопки навігації
+                const nextButton = document.querySelector('button[aria-label="Next"]');
+                if (nextButton) {
+                    nextButton.click();
+                    await new Promise(resolve => setTimeout(resolve, 2000)); // Чекаємо на завантаження нового зображення
+                } else {
+                    // Якщо немає кнопки "Далі", пробуємо прокрутити
+                    mediaContainer.scrollTo(0, mediaContainer.scrollHeight);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                // Перевіряємо чи досягли ми кінця
+                if (mediaContainer.scrollHeight === previousHeight && !nextButton) {
+                    attempts++;
+                }
+                previousHeight = mediaContainer.scrollHeight;
+            }
+
+            return Array.from(allImages);
+        }
+
+        // Отримуємо всі зображення з поста
+        const allImages = await collectAllImages();
+        console.log('Знайдено зображень:', allImages.length); // Додаємо логування
+
+        // Отримуємо медіа елементи
         const mediaContainer = document.querySelector('article');
         const mediaElements = mediaContainer ? Array.from(mediaContainer.querySelectorAll('img[srcset], video')) : [];
 
-        // Process media URLs
+        // Обробляємо URL медіа
         const mediaUrls = mediaElements.map(el => {
             if (el.tagName.toLowerCase() === 'video') {
                 return {
@@ -378,7 +434,7 @@ async function parseInstagramPost(page, mediaDir, language) {
             if (srcset) {
                 const srcsetUrls = srcset.split(',')
                     .map(s => s.trim().split(' ')[0]);
-                return srcsetUrls[srcsetUrls.length - 1]; // Найвища роздільна здатність
+                return srcsetUrls[srcsetUrls.length - 1];
             }
             return el.src;
         }).filter(url => {
@@ -386,10 +442,10 @@ async function parseInstagramPost(page, mediaDir, language) {
             return url && !url.includes('avatar') && !url.includes('profile') && !url.includes('icon');
         });
 
-        // Determine post type
+        // Визначаємо тип поста
         let typeOfPost = '';
         const hasVideo = mediaElements.some(el => el.tagName.toLowerCase() === 'video');
-        const hasMultipleImages = mediaElements.filter(el => el.tagName.toLowerCase() === 'img').length > 1;
+        const hasMultipleImages = allImages.length > 1;
 
         if (hasVideo) {
             typeOfPost = 'Video';
@@ -401,7 +457,7 @@ async function parseInstagramPost(page, mediaDir, language) {
 
         return {
             ...data,
-            mediaUrls,
+            mediaUrls: hasMultipleImages ? allImages : mediaUrls,
             typeOfPost,
         };
     });
@@ -464,7 +520,7 @@ async function parseInstagramPost(page, mediaDir, language) {
         shares: postData.shares,
         media: mediaFilenames.join(', '),
         authorPicture: authorPictureFilename,
-        timestamp: new Date().toISOString()
+        url: url
     };
 }
 
