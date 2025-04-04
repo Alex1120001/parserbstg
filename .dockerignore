@@ -1,8 +1,0 @@
-node_modules
-npm-debug.log
-downloads
-media
-.git
-.gitignore
-.env
-*.log 

@@ -7,6 +7,7 @@ const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 const axios = require('axios');
+const { platform } = require('os');
 
 // Create required directories if they don't exist
 ['downloads', 'media'].forEach(dir => {
@@ -107,14 +108,13 @@ async function parseUrl(browser, url, mediaDir, language) {
         // Determine if it's Facebook or Instagram
         const isFacebook = url.includes('facebook.com') || url.includes('fb.watch');
         const isInstagram = url.includes('instagram.com');
+        const isReddit = url.includes('reddit.com');
 
-        if (isFacebook) {
-            return await parseFacebookPost(page, mediaDir, language, url);
-        } else if (isInstagram) {
-            return await parseInstagramPost(page, mediaDir, language, url);
-        } else {
-            throw new Error('Unsupported social media platform');
-        }
+        if (isFacebook) return await parseFacebookPost(page, mediaDir, language, url);
+        else if (isInstagram) return await parseInstagramPost(page, mediaDir, language, url);
+        else if (isReddit) return await parseRedditPost(page, mediaDir, language, url);
+        else throw new Error('Unsupported social media platform');
+
     } finally {
         await page.close();
     }
@@ -524,6 +524,46 @@ async function parseInstagramPost(page, mediaDir, language, url) {
     };
 }
 
+
+async function parseRedditPost(page, mediaDir, language, url) {
+    console.log('Parsing Reddit post...');
+
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+
+
+    // const pageContent = await page.content();
+    // // Зберігаємо HTML-код у файл
+    // const filePath = path.join(mediaDir, 'reddit-page-content.html');
+    // fs.writeFileSync(filePath, pageContent);
+    // console.log(`HTML-код сторінки збережено у файл: ${filePath}`);
+
+
+    const postData = await page.evaluate(() => {
+        const titlePage = document.title;
+        const titlePageContent = titlePage.split(':');
+
+
+        const likeElement = document.querySelectorAll('faceplate-number')[2];
+        const likeValue = likeElement?.getAttribute('number');
+
+
+
+        const data = {
+            authorName: titlePageContent[2]?.trim() || '',
+            description: titlePageContent[0] || '',
+            likes: likeValue || 0,
+        };
+        return data;
+    });
+
+    return {
+        platform: 'Reddit',
+        authorName: postData.authorName,
+        likes: postData.likes,
+        
+    };
+}
 module.exports = {
     parseExcelFile
 };

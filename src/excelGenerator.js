@@ -36,6 +36,12 @@ async function generateExcelFile(data) {
                 'Author_Picture': item.authorPicture,
                 'Post_url': item.url
             };
+        } else if (item.platform === 'Reddit') {
+            baseData = {
+                'Author Name': item.authorName,
+                'Description': item.description,
+                'likes': item.likes,
+            };
         }
 
         return baseData;
