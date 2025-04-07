@@ -364,7 +364,7 @@ async function parseInstagramPost(page, mediaDir, language, url) {
             timestamp: document.querySelector('article header time')?.dateTime || '',
         };
 
-        // Get video and audio URLs
+       
         const urls = [];
         window.performance.getEntriesByType('resource').forEach(entry => {
             if (entry.name.includes('.mp4') || entry.name.includes('.m3u8')) {
