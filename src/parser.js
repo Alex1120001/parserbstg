@@ -7,7 +7,6 @@ const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
 const axios = require('axios');
-const { platform } = require('os');
 
 // Create required directories if they don't exist
 ['downloads', 'media'].forEach(dir => {
@@ -15,6 +14,9 @@ const { platform } = require('os');
         fs.mkdirSync(dir);
     }
 });
+
+// Додаємо кеш для аватарок
+const avatarCache = new Map();
 
 async function downloadImage(url, filename, mediaDir, browser) {
     // Skip data URLs
@@ -259,7 +261,14 @@ async function parseFacebookPost(page, mediaDir, language, url) {
 
     let authorPictureFilename = '';
     if (postData.authorPicture) {
-        authorPictureFilename = await downloadImage(postData.authorPicture, `author_${Date.now()}.jpg`, mediaDir, page.browser());
+        if (avatarCache.has(postData.authorName)) {
+            authorPictureFilename = avatarCache.get(postData.authorName);
+            console.log(`Використовуємо кешовану аватарку для ${postData.authorName}: ${authorPictureFilename}`);
+        } else {
+            authorPictureFilename = await downloadImage(postData.authorPicture, `author_${Date.now()}.jpg`, mediaDir, page.browser());
+            avatarCache.set(postData.authorName, authorPictureFilename);
+            console.log(`Збережено нову аватарку для ${postData.authorName}: ${authorPictureFilename}`);
+        }
     }
 
     const mediaFilenames = [];
@@ -346,7 +355,7 @@ async function parseInstagramPost(page, mediaDir, language, url) {
         }
 
         const data = {
-            authorName: document.querySelectorAll('article header [role="link"]')[1]?.textContent || '',
+            authorName: document.querySelectorAll('article header [role="link"]')[1]?.textContent || document.querySelectorAll('article header [role="link"]')[2]?.textContent,
             authorPicture: document.querySelector('article header img')?.src || '',
             content: document.querySelector('article h1')?.textContent || '',
             likes: likesCount == 0 ? 11 : likesCount,
@@ -465,7 +474,14 @@ async function parseInstagramPost(page, mediaDir, language, url) {
     // Download author picture
     let authorPictureFilename = '';
     if (postData.authorPicture) {
-        authorPictureFilename = await downloadImage(postData.authorPicture, `author_${Date.now()}.jpg`, mediaDir, page.browser());
+        if (avatarCache.has(postData.authorName)) {
+            authorPictureFilename = avatarCache.get(postData.authorName);
+            console.log(`Використовуємо кешовану аватарку для ${postData.authorName}: ${authorPictureFilename}`);
+        } else {
+            authorPictureFilename = await downloadImage(postData.authorPicture, `author_${Date.now()}.jpg`, mediaDir, page.browser());
+            avatarCache.set(postData.authorName, authorPictureFilename);
+            console.log(`Збережено нову аватарку для ${postData.authorName}: ${authorPictureFilename}`);
+        }
     }
 
     // Download post media
