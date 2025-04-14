@@ -38,9 +38,18 @@ async function generateExcelFile(data) {
             };
         } else if (item.platform === 'Reddit') {
             baseData = {
-                'Author Name': item.authorName,
-                'Description': item.description,
-                'likes': item.likes,
+                'Language': item.language,
+                'Category': 'xx',
+                'Type of post': item.typePost,
+                'Author Name': item.communityName,
+                'Description': item.postTitle,
+                'Description 2': item.description,
+                'Likes': item.likes,
+                'Comments': item.comments,
+                'Shares': 0,
+                'Media': item.media,
+                'Author_Picture': item.authorPicture,
+                'Post_url': item.url
             };
         }
 
